@@ -94,10 +94,18 @@
       </div>
 
       <div class="card">
-        <h2>Film / Network</h2>
-        <label>Film thickness (release from both faces)</label>
-        <input type="range" id="thick" min="10" max="1000" step="5" value="300">
-        <div class="rowval"><span>µm</span><b><span id="thickV">300</span> µm</b></div>
+        <h2>Geometry / Network</h2>
+        <label>Geometry</label>
+        <select id="geom">
+          <option value="slab">Slab / film — release from both faces</option>
+          <option value="cylinder">Cylinder / fiber — radial release</option>
+          <option value="sphere">Sphere / bead / microsphere</option>
+          <option value="cube">Cube — release from all faces</option>
+        </select>
+
+        <label id="sizeLbl">Film thickness</label>
+        <input type="range" id="thick" min="10" max="2000" step="5" value="300">
+        <div class="rowval"><span id="sizeUnit">thickness, µm</span><b><span id="thickV">300</span> µm</b></div>
 
         <label>Swollen polymer volume fraction φ (dry solids in the wet gel)</label>
         <input type="range" id="phi" min="0.05" max="0.9" step="0.01" value="0.75">
@@ -141,7 +149,7 @@
           <div class="stat"><div class="k">Effective D in film</div><div class="v" id="oDeff">–</div><div class="u">m²/s (D_eff / D₀ = <span id="oRatio">–</span>)</div></div>
           <div class="stat"><div class="k">Half-release time t₅₀</div><div class="v" id="oT50">–</div><div class="u">50 % of load leached</div></div>
           <div class="stat"><div class="k">t₉₀</div><div class="v" id="oT90">–</div><div class="u">90 % leached</div></div>
-          <div class="stat"><div class="k">Total leachable</div><div class="v" id="oMinf">–</div><div class="u">mg per cm² of film</div></div>
+          <div class="stat"><div class="k">Areal load M∞/S</div><div class="v" id="oMinf">–</div><div class="u">mg per cm² of release surface</div></div>
           <div class="stat"><div class="k">Peak leach flux</div><div class="v" id="oPeak">–</div><div class="u">µg·cm⁻²·h⁻¹ (initial)</div></div>
         </div>
         <div class="bench" id="bench">–</div>
@@ -186,11 +194,19 @@
     <code>φ_eff = φ·(1 + s·log₁₀(I/150))</code> with s ≈ 0.35 (chitosan) or ≈ 0.05 (near-neutral silk), clamped to
     a physical range. Lower salt → more swelling → faster leaching.</p>
 
-    <p><b>4 — Release kinetics (Crank thin-slab, desorption from both faces).</b></p>
-    <div class="eq">Mₜ/M∞ = 1 − Σₙ [ 8 / ((2n+1)²π²) ] · exp( −(2n+1)²π² · D_eff·t / L² )</div>
-    <p class="note">L is film thickness (release from both surfaces). Early-time this reduces to the familiar
-    <code>Mₜ/M∞ ≈ 4·√(D_eff·t/(πL²))</code> and gives half-time <code>t₅₀ ≈ 0.049·L²/D_eff</code>. The instantaneous
-    leach flux plotted is <code>d(Mₜ)/dt</code> per unit area, using the loading you set. M∞ per area = C₀·L.</p>
+    <p><b>4 — Release kinetics (Crank exact solutions, perfect-sink desorption).</b> Each geometry has its own series;
+    the characteristic length that scales the dimensionless time τ = D_eff·t/ℓ² depends on the shape:</p>
+    <div class="eq">slab (thickness L):&nbsp;&nbsp;Mₜ/M∞ = 1 − Σₙ [8/((2n+1)²π²)]·exp(−(2n+1)²π²·τ),&nbsp; ℓ=L
+&nbsp;
+sphere (radius a):&nbsp;&nbsp;Mₜ/M∞ = 1 − (6/π²)·Σₙ (1/n²)·exp(−n²π²·τ),&nbsp; ℓ=a
+&nbsp;
+cylinder (radius a):&nbsp;Mₜ/M∞ = 1 − Σₙ (4/βₙ²)·exp(−βₙ²·τ),&nbsp; J₀(βₙ)=0,&nbsp; ℓ=a
+&nbsp;
+cube (edge a):&nbsp;&nbsp;Mₜ/M∞ = 1 − [R_slab(τ)]³&nbsp; (product of three 1-D sheets),&nbsp; ℓ=a</div>
+    <p class="note">Half-times scale as t₅₀ ≈ k·ℓ²/D_eff with k ≈ 0.049 (slab), 0.063 (cylinder), 0.030 (sphere) —
+    for the same size, a sphere empties fastest because it has the most surface per volume. The plotted leach flux is
+    <code>d(Mₜ)/dt</code> normalized by the true release surface S, using your loading: areal load M∞/S = C₀·(V/S),
+    where V/S = L/2 (slab), a/2 (cylinder), a/3 (sphere), a/6 (cube).</p>
 
     <p><b>Benchmarking.</b> Reported <i>effective</i> diffusivities for small polar solutes (glycerol, urea, sugars,
     small drugs) in swollen chitosan and silk-fibroin films fall in roughly <b>10⁻¹³ – 10⁻¹¹ m²/s</b>, i.e. 1–3 orders
@@ -227,15 +243,42 @@ for(const k in MOLECULES){
 function waterVisc(TK){ return 2.414e-5 * Math.pow(10, 247.8/(TK-140)); } // Pa·s
 function clamp(x,a,b){ return Math.min(b,Math.max(a,x)); }
 
-function releaseFrac(tau){ // Crank slab, tau = D t / L^2
+const PI2=Math.PI*Math.PI;
+// zeros of the Bessel function J0, for the infinite-cylinder solution
+const J0roots=[2.404826,5.520078,8.653728,11.791534,14.930918,18.071064,21.211637,
+  24.352472,27.493479,30.634606,33.775821,36.917098,40.058426,43.199792,46.341188];
+
+// Geometry map. charLen = length that scales tau (=D t / charLen^2);
+// VoverS = volume-to-surface ratio (sets areal loading & flux). size = user slider value (m).
+const GEOM={
+  slab:    {sizeName:'Film thickness',    unit:'thickness, µm', charLen:s=>s,   VoverS:s=>s/2},
+  cylinder:{sizeName:'Cylinder diameter', unit:'diameter, µm',  charLen:s=>s/2, VoverS:s=>s/4},
+  sphere:  {sizeName:'Sphere diameter',   unit:'diameter, µm',  charLen:s=>s/2, VoverS:s=>s/6},
+  cube:    {sizeName:'Cube edge length',  unit:'edge, µm',      charLen:s=>s,   VoverS:s=>s/6},
+};
+
+// remaining fraction for a plane sheet (both faces), tau = D t / L^2
+function Rslab(t){
+  if(t<=0) return 1; let s=0;
+  for(let n=0;n<200;n++){ const m=2*n+1; const e=m*m*PI2*t; s+=(8/(m*m*PI2))*Math.exp(-e); if(e>60) break; }
+  return clamp(s,0,1);
+}
+// fractional release Mt/M_inf for a geometry, tau referenced to its charLen
+function fracGeom(geom,tau){
   if(tau<=0) return 0;
-  let s=0;
-  for(let n=0;n<60;n++){
-    const m=2*n+1;
-    s += (8/(m*m*Math.PI*Math.PI))*Math.exp(-m*m*Math.PI*Math.PI*tau);
-    if(m*m*Math.PI*Math.PI*tau>60) break; // converged
+  const sq=Math.sqrt(tau/Math.PI);
+  if(geom==='sphere'){                       // Crank sphere, radius a
+    if(tau<0.02) return clamp(6*sq-3*tau,0,1);   // early-time series
+    let s=0; for(let n=1;n<=300;n++){ const e=n*n*PI2*tau; s+=Math.exp(-e)/(n*n); if(e>60) break; }
+    return clamp(1-(6/PI2)*s,0,1);
   }
-  return clamp(1-s,0,1);
+  if(geom==='cylinder'){                      // Crank infinite cylinder, radius a
+    if(tau<0.02) return clamp(4*sq-tau,0,1);
+    let s=0; for(const b of J0roots){ s+=(4/(b*b))*Math.exp(-b*b*tau); }
+    return clamp(1-s,0,1);
+  }
+  if(geom==='cube') return clamp(1-Math.pow(Rslab(tau),3),0,1); // product of 3 slabs
+  return clamp(1-Rslab(tau),0,1);             // slab
 }
 
 function readState(){
@@ -243,7 +286,9 @@ function readState(){
   const mat = MATERIALS[document.getElementById('mat').value];
   const TC = +document.getElementById('temp').value;
   const I  = +document.getElementById('ion').value;
-  const L  = +document.getElementById('thick').value*1e-6; // m
+  const geomKey = document.getElementById('geom').value;
+  const G  = GEOM[geomKey];
+  const size = +document.getElementById('thick').value*1e-6; // characteristic dimension, m
   const phi0 = +document.getElementById('phi').value;
   const xl = +document.getElementById('xl').value;
   const chi = +document.getElementById('chi').value;
@@ -260,16 +305,18 @@ function readState(){
   const fXL = Math.exp(-2*xl);
   const Deff = D0T*fMM*fCryst*fXL*mat.matrix;
 
-  const t50 = 0.049*L*L/Deff;
-  // t90 via inverse of series (scan)
-  const t90 = invTau(0.90)*L*L/Deff;
-  const Minf_area = load*(L*100); // mg/cm^3 * cm  -> mg/cm^2  (L in m ->*100 = cm)
+  const charLen = G.charLen(size);       // m
+  const VoverS  = G.VoverS(size);        // m
+  const t50 = invTauGeom(geomKey,0.50)*charLen*charLen/Deff;
+  const t90 = invTauGeom(geomKey,0.90)*charLen*charLen/Deff;
+  const Minf_area = load*(VoverS*100);   // mg/cm^3 * cm -> mg/cm^2 (per unit surface area)
 
-  return {mol,mat,TC,I,L,phi0,phi,xl,chi,load,D0T,Deff,ratio:Deff/D0T,t50,t90,Minf_area};
+  return {mol,mat,geomKey,G,TC,I,size,charLen,VoverS,phi0,phi,xl,chi,load,
+          D0T,Deff,ratio:Deff/D0T,t50,t90,Minf_area};
 }
-function invTau(f){ // find tau s.t. releaseFrac=f
-  let lo=1e-5,hi=1.0;
-  for(let i=0;i<60;i++){ const m=(lo+hi)/2; if(releaseFrac(m)<f) lo=m; else hi=m; }
+function invTauGeom(geom,f){ // find tau such that fracGeom(geom,tau)=f
+  let lo=1e-6,hi=2.0;
+  for(let i=0;i<70;i++){ const m=(lo+hi)/2; if(fracGeom(geom,m)<f) lo=m; else hi=m; }
   return (lo+hi)/2;
 }
 function fmtD(x){ // scientific
@@ -336,7 +383,9 @@ function update(){
   // labels
   document.getElementById('tempV').textContent=S.TC;
   document.getElementById('ionV').textContent=S.I;
-  document.getElementById('thickV').textContent=(S.L*1e6).toFixed(0);
+  document.getElementById('thickV').textContent=(S.size*1e6).toFixed(0);
+  document.getElementById('sizeLbl').textContent=S.G.sizeName;
+  document.getElementById('sizeUnit').textContent=S.G.unit;
   document.getElementById('phiV').textContent=S.phi0.toFixed(2);
   document.getElementById('xlV').textContent=S.xl.toFixed(2);
   document.getElementById('chiV').textContent=S.chi.toFixed(2);
@@ -353,13 +402,14 @@ function update(){
   document.getElementById('oMinf').textContent=S.Minf_area.toFixed(3);
 
   // build curves
-  const t98 = invTau(0.98)*S.L*S.L/S.Deff;
+  const cl2 = S.charLen*S.charLen;
+  const t98 = invTauGeom(S.geomKey,0.98)*cl2/S.Deff;
   const tmax = t98*1.05;
   const N=240; const xs=[],cum=[],rate=[];
   const Minf_ug = S.Minf_area*1000; // µg/cm^2
   for(let i=0;i<=N;i++){
     const t=tmax*i/N; xs.push(t);
-    const f=releaseFrac(S.Deff*t/(S.L*S.L));
+    const f=fracGeom(S.geomKey,S.Deff*t/cl2);
     cum.push(f*100);
   }
   // instantaneous flux µg/cm2/h via finite difference
@@ -367,8 +417,8 @@ function update(){
   for(let i=0;i<=N;i++){
     const t=xs[i];
     const dt=tmax/N||1;
-    const fa=releaseFrac(S.Deff*Math.max(t-dt/2,0)/(S.L*S.L));
-    const fb=releaseFrac(S.Deff*(t+dt/2)/(S.L*S.L));
+    const fa=fracGeom(S.geomKey,S.Deff*Math.max(t-dt/2,0)/cl2);
+    const fb=fracGeom(S.geomKey,S.Deff*(t+dt/2)/cl2);
     const flux=Minf_ug*(fb-fa)/dt*3600; // µg/cm2/h
     rate.push(flux); if(flux>peak)peak=flux;
   }
@@ -393,9 +443,11 @@ function update(){
     b.innerHTML=`✓ D_eff = <b>${fmtD(S.Deff)}</b> m²/s sits within the experimentally-observed band (10⁻¹³–10⁻¹¹ m²/s) for small solutes in swollen chitosan/silk films — benchmarks believably.`;
   }
 
-  // hand mobility/mesh to animation
+  // hand mobility/mesh to animation; reseed particles if the geometry changed
   animParams();
+  if(lastGeom!==S.geomKey){ lastGeom=S.geomKey; reseed(); }
 }
+let lastGeom='slab';
 
 // ================= ANIMATION =================
 const acv=document.getElementById('anim');
@@ -406,7 +458,7 @@ function initAnim(){
   acv.width=aw*dpr; acv.height=ah*dpr;
   actx=acv.getContext('2d'); actx.setTransform(dpr,0,0,dpr,0,0);
 }
-let filmTop, filmBot, mobility=1, meshN=8;
+let mobility=1, meshN=8;
 function animParams(){
   if(!S) return;
   // mobility scaled by log10(Deff) mapped to visible speed
@@ -415,84 +467,87 @@ function animParams(){
   meshN=Math.round(6+ (S.phi + S.xl*0.5 + S.chi*0.5)*10); // denser mesh when tighter
   buildChains();
 }
+// geometry cross-section drawn in the canvas
+function shapeDef(){
+  const cx=aw/2, cy=ah/2, g=S?S.geomKey:'slab';
+  if(g==='sphere'||g==='cylinder') return {type:'circle',cx,cy,R:Math.min(aw,ah)*0.34,g};
+  if(g==='cube') return {type:'square',cx,cy,H:Math.min(aw,ah)*0.30,g};
+  return {type:'band',top:ah*0.22,bot:ah*0.78,g};
+}
+function pathFor(sh){
+  actx.beginPath();
+  if(sh.type==='circle') actx.arc(sh.cx,sh.cy,sh.R,0,6.28);
+  else if(sh.type==='square') actx.rect(sh.cx-sh.H,sh.cy-sh.H,2*sh.H,2*sh.H);
+  else actx.rect(0,sh.top,aw,sh.bot-sh.top);
+}
+function inShape(sh,x,y){
+  if(sh.type==='circle') return (x-sh.cx)**2+(y-sh.cy)**2 < sh.R*sh.R;
+  if(sh.type==='square') return Math.abs(x-sh.cx)<sh.H && Math.abs(y-sh.cy)<sh.H;
+  return y>sh.top && y<sh.bot;
+}
+function placeInside(p,sh){
+  p.released=false; p.alpha=1; p.vx=0; p.vy=0;
+  if(sh.type==='circle'){ const a=Math.random()*6.28, r=Math.sqrt(Math.random())*sh.R*0.92; p.x=sh.cx+Math.cos(a)*r; p.y=sh.cy+Math.sin(a)*r; }
+  else if(sh.type==='square'){ p.x=sh.cx+(Math.random()-0.5)*1.8*sh.H; p.y=sh.cy+(Math.random()-0.5)*1.8*sh.H; }
+  else { p.x=20+Math.random()*(aw-40); p.y=sh.top+Math.random()*(sh.bot-sh.top); }
+}
 function reseed(){
-  filmTop=ah*0.22; filmBot=ah*0.78;
+  const sh=shapeDef();
   particles=[]; total=140; released=0;
-  for(let i=0;i<total;i++){
-    particles.push({
-      x:20+Math.random()*(aw-40),
-      y:filmTop+Math.random()*(filmBot-filmTop),
-      released:false, vy:0, alpha:1
-    });
-  }
+  for(let i=0;i<total;i++){ const p={}; placeInside(p,sh); particles.push(p); }
   buildChains();
 }
 function buildChains(){
   chains=[];
-  const n=Math.max(5,meshN);
+  const n=Math.max(6,Math.round(meshN*1.6));
   for(let i=0;i<n;i++){
-    const y=filmTop+ (i+0.5)/n*(filmBot-filmTop);
-    chains.push({y, amp:6+Math.random()*8, phase:Math.random()*6.28, k:(1.5+Math.random()*2)});
+    chains.push({y:(i+0.5)/n*ah, amp:5+Math.random()*7, phase:Math.random()*6.28, k:(1.5+Math.random()*2)});
   }
 }
 function stepAnim(){
   if(!actx) return;
+  const sh=shapeDef();
   actx.clearRect(0,0,aw,ah);
-  // solution regions
-  actx.fillStyle='rgba(30,58,90,.25)';
-  actx.fillRect(0,0,aw,filmTop); actx.fillRect(0,filmBot,aw,ah-filmBot);
-  // film band
-  actx.fillStyle='rgba(94,234,212,.05)';
-  actx.fillRect(0,filmTop,aw,filmBot-filmTop);
-  actx.strokeStyle='rgba(94,234,212,.35)'; actx.setLineDash([5,5]);
-  actx.beginPath(); actx.moveTo(0,filmTop); actx.lineTo(aw,filmTop);
-  actx.moveTo(0,filmBot); actx.lineTo(aw,filmBot); actx.stroke(); actx.setLineDash([]);
-  actx.fillStyle='rgba(147,160,192,.7)'; actx.font='11px sans-serif'; actx.textAlign='left';
-  actx.fillText('aqueous medium (sink)',8,14);
-  actx.fillText('biomaterial film',8,(filmTop+filmBot)/2);
+  actx.fillStyle='rgba(30,58,90,.18)'; actx.fillRect(0,0,aw,ah); // aqueous medium
 
-  // chains (wavy polymer strands)
+  // matrix region (clipped chains)
+  actx.save(); pathFor(sh); actx.fillStyle='rgba(94,234,212,.06)'; actx.fill(); actx.clip();
   const t=performance.now()/1000;
   actx.strokeStyle='rgba(94,234,212,.5)'; actx.lineWidth=1.6;
   for(const c of chains){
     actx.beginPath();
-    for(let x=0;x<=aw;x+=6){
-      const y=c.y+Math.sin(x*0.02*c.k+c.phase+t*0.4)*c.amp;
-      x?actx.lineTo(x,y):actx.moveTo(x,y);
-    }
+    for(let x=0;x<=aw;x+=6){ const y=c.y+Math.sin(x*0.02*c.k+c.phase+t*0.4)*c.amp; x?actx.lineTo(x,y):actx.moveTo(x,y); }
     actx.stroke();
-    // crosslink nodes
     actx.fillStyle='rgba(129,140,248,.8)';
-    for(let x=aw*0.15;x<aw;x+=aw/5){
-      const y=c.y+Math.sin(x*0.02*c.k+c.phase+t*0.4)*c.amp;
-      actx.beginPath(); actx.arc(x,y,2.2,0,6.28); actx.fill();
-    }
+    for(let x=aw*0.12;x<aw;x+=aw/6){ const y=c.y+Math.sin(x*0.02*c.k+c.phase+t*0.4)*c.amp; actx.beginPath(); actx.arc(x,y,2.2,0,6.28); actx.fill(); }
   }
+  actx.restore();
+
+  // outline
+  pathFor(sh); actx.strokeStyle='rgba(94,234,212,.4)';
+  actx.setLineDash(sh.type==='band'?[5,5]:[]); actx.lineWidth=1.5; actx.stroke(); actx.setLineDash([]);
+  actx.fillStyle='rgba(147,160,192,.7)'; actx.font='11px sans-serif'; actx.textAlign='left';
+  actx.fillText('aqueous medium (sink)',8,14);
 
   // particles
   const col=S?S.mol.color:'#4ade80';
   for(const p of particles){
     if(!p.released){
-      // random walk, mobility-scaled
       p.x+=(Math.random()-0.5)*2*mobility;
       p.y+=(Math.random()-0.5)*2*mobility;
-      p.x=clamp(p.x,6,aw-6);
-      // escape probability higher near a face; if crosses face -> released
-      if(p.y<filmTop){ p.released=true; p.vy=-(0.4+Math.random()*0.6); released++; }
-      else if(p.y>filmBot){ p.released=true; p.vy=(0.4+Math.random()*0.6); released++; }
-    } else {
-      p.y+=p.vy; p.x+=(Math.random()-0.5)*0.6; p.alpha-=0.004;
-      if(p.alpha<=0 || p.y<-10 || p.y>ah+10){
-        // respawn inside film to keep flow going (visual only)
-        p.released=false; p.alpha=1; p.vy=0;
-        p.x=20+Math.random()*(aw-40); p.y=filmTop+Math.random()*(filmBot-filmTop);
-        released=Math.max(0,released-1);
+      if(!inShape(sh,p.x,p.y)){
+        p.released=true; released++;
+        let dx,dy;
+        if(sh.type==='band'){ dx=(Math.random()-0.5)*0.4; dy=p.y<sh.top?-1:1; }
+        else { dx=p.x-sh.cx; dy=p.y-sh.cy; const d=Math.hypot(dx,dy)||1; dx/=d; dy/=d; }
+        const sp=0.5+Math.random()*0.7; p.vx=dx*sp; p.vy=dy*sp;
       }
+    } else {
+      p.x+=p.vx; p.y+=p.vy; p.alpha-=0.004;
+      if(p.alpha<=0 || p.x<-10||p.x>aw+10||p.y<-10||p.y>ah+10){ placeInside(p,sh); released=Math.max(0,released-1); }
     }
-    actx.globalAlpha=Math.max(0,p.alpha);
-    actx.fillStyle=col;
-    actx.beginPath(); actx.arc(p.x,p.y,3.2,0,6.28); actx.fill();
-    actx.globalAlpha=1;
+    actx.globalAlpha=Math.max(0,p.alpha); actx.fillStyle=col;
+    actx.beginPath(); actx.arc(p.x,p.y,3.2,0,6.28); actx.fill(); actx.globalAlpha=1;
   }
   document.getElementById('relLive').textContent='released: '+Math.round(released/total*100)+' %';
 }
